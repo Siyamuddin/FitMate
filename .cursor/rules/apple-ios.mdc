@@ -1,0 +1,38 @@
+---
+description: Design and review Flutter UI using Apple HIG and native iOS patterns
+alwaysApply: true
+---
+
+# Apple iOS Design
+
+Follow Apple Human Interface Guidelines:
+https://developer.apple.com/design/human-interface-guidelines/
+
+Before implementing a screen:
+
+1. Identify the primary user goal
+2. Identify the primary action
+3. Identify secondary actions
+4. Determine the iOS navigation pattern
+5. Choose inline, grouped, sheet, full-screen, or alert
+6. Use system typography
+7. Use semantic colors
+8. Plan VoiceOver, Dynamic Type, contrast, 44pt targets, Reduce Motion
+9. Plan haptics (selective)
+10. Plan fast, subtle animation
+
+Prefer Cupertino widgets. Do not blindly use Material.
+
+Tokens live in `AppColors`, `AppTypography`, `AppSpacing`, `AppRadius`, `AppElevation`, `AppMotion`. Do not scatter visual constants.
+
+Tab bar: Home, Workout, Nutrition, Coach, Progress. Profile is secondary.
+
+Home answers "What should I do today?"
+
+Active workout is the highest UX priority: large targets, minimal typing, one-handed use.
+
+Coach is not a ChatGPT clone. Show insight cards, then conversation, then structured Apply/Dismiss actions.
+
+Materials only on tab/nav bars. Content cards stay opaque. Honor Reduce Motion. Never indicate status with color alone.
+
+After each screen, review as an Apple designer and simplify if needed.
