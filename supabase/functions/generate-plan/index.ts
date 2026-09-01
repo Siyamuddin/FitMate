@@ -32,12 +32,12 @@ Deno.serve(async (req) => {
 
     const allowed = new Set((exercises ?? []).map((row: { id: string }) => row.id))
     const result = await chatJson({
-      model: config?.model ?? prompt?.model ?? 'gpt-4.1',
+      model: config?.model ?? prompt?.model ?? 'gpt-5.6-luna',
       temperature: Number(config?.temperature ?? prompt?.temperature ?? 0.4),
       maxTokens: config?.max_output_tokens ?? 2500,
       system: prompt?.system_prompt ?? 'You are FitMate. Return JSON only.',
       user: JSON.stringify({
-        instruction: 'Create a structured workout plan and meal outline using only provided exercise and food IDs.',
+        instruction: prompt?.plan_instruction ?? 'Create a structured workout plan and meal outline using only provided exercise and food IDs.',
         profile,
         goal,
         prefs,
@@ -157,6 +157,7 @@ Deno.serve(async (req) => {
     if (error instanceof Response) return error
     const message = error instanceof Error ? error.message : 'plan_failed'
     if (message === 'rate_limited') return json({ error: 'Daily coaching limit reached.' }, 429)
+    if (message === 'coach_disabled') return json({ error: 'Coaching is temporarily unavailable.' }, 400)
     return json({ error: 'Could not generate a plan. Your profile is saved.' }, 400)
   }
 })

@@ -9,6 +9,9 @@ export async function enforceRateLimit(admin: SupabaseClient, userId: string) {
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .gte('created_at', since)
+  if (config && config.enabled === false) {
+    throw new Error('coach_disabled')
+  }
   if ((count ?? 0) >= limit) {
     throw new Error('rate_limited')
   }

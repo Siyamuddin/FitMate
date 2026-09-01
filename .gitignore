@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!admin/.env.example
 !supabase/functions/.env.example
 supabase/functions/.env
 supabase/.temp/
@@ -56,3 +57,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+node_modules/
+admin/.next/
+admin/out/
+

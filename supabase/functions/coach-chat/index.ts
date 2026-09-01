@@ -36,10 +36,10 @@ Deno.serve(async (req) => {
     })
 
     const result = await chatJson({
-      model: config?.model ?? prompt?.model ?? 'gpt-4.1',
+      model: config?.model ?? prompt?.model ?? 'gpt-5.6-luna',
       temperature: Number(config?.temperature ?? 0.4),
       maxTokens: config?.max_output_tokens ?? 1200,
-      system: `${prompt?.system_prompt ?? ''}\nReturn JSON with keys: message, requires_confirmation, actions (array of {type, target_id, changes}).`,
+      system: `${prompt?.system_prompt ?? ''}\n${prompt?.coach_instruction ?? 'Return JSON with keys: message, requires_confirmation, actions (array of {type, target_id, changes}).'}`,
       user: JSON.stringify({ message, context }),
     })
 
@@ -89,6 +89,7 @@ Deno.serve(async (req) => {
     if (error instanceof Response) return error
     const message = error instanceof Error ? error.message : 'chat_failed'
     if (message === 'rate_limited') return json({ error: 'Daily coaching limit reached.' }, 429)
+    if (message === 'coach_disabled') return json({ error: 'Coaching is temporarily unavailable.' }, 400)
     return json({ error: failClosedMessage() }, 400)
   }
 })
