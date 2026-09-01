@@ -13,7 +13,11 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.textInputAction,
     this.autofillHints,
+    this.autofocus = false,
+    this.textCapitalization = TextCapitalization.none,
     this.onSubmitted,
+    this.onChanged,
+    this.enabled = true,
   });
 
   final TextEditingController controller;
@@ -22,7 +26,11 @@ class AppTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final Iterable<String>? autofillHints;
+  final bool autofocus;
+  final TextCapitalization textCapitalization;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +45,11 @@ class AppTextField extends StatelessWidget {
         keyboardType: keyboardType,
         textInputAction: textInputAction,
         autofillHints: autofillHints,
+        autofocus: autofocus,
+        textCapitalization: textCapitalization,
         onSubmitted: onSubmitted,
+        onChanged: onChanged,
+        enabled: enabled,
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
           vertical: 14,

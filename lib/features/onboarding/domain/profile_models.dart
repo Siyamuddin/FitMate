@@ -75,8 +75,118 @@ class Profile extends Equatable {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'user_id': userId,
+      'display_name': displayName,
+      'age': age,
+      'sex': sex?.name,
+      'height_cm': heightCm,
+      'activity_level': activityLevel == null ? null : activityLevelValues[activityLevel],
+      'training_experience': trainingExperience?.name,
+      'training_environment': trainingEnvironment == null
+          ? null
+          : const <TrainingEnvironment, String>{
+              TrainingEnvironment.home: 'home',
+              TrainingEnvironment.gym: 'gym',
+              TrainingEnvironment.outdoor: 'outdoor',
+              TrainingEnvironment.combination: 'combination',
+            }[trainingEnvironment],
+      'role': role,
+      'onboarding_completed_at': onboardingCompletedAt?.toUtc().toIso8601String(),
+    };
+  }
+
+  Profile copyWith({
+    String? displayName,
+    int? age,
+    Sex? sex,
+    double? heightCm,
+    ActivityLevel? activityLevel,
+    TrainingExperience? trainingExperience,
+    TrainingEnvironment? trainingEnvironment,
+  }) {
+    return Profile(
+      id: id,
+      userId: userId,
+      displayName: displayName ?? this.displayName,
+      age: age ?? this.age,
+      sex: sex ?? this.sex,
+      heightCm: heightCm ?? this.heightCm,
+      activityLevel: activityLevel ?? this.activityLevel,
+      trainingExperience: trainingExperience ?? this.trainingExperience,
+      trainingEnvironment: trainingEnvironment ?? this.trainingEnvironment,
+      role: role,
+      onboardingCompletedAt: onboardingCompletedAt,
+    );
+  }
+
   @override
-  List<Object?> get props => <Object?>[id, userId, onboardingCompletedAt, displayName];
+  List<Object?> get props => <Object?>[
+        id,
+        userId,
+        displayName,
+        age,
+        sex,
+        heightCm,
+        activityLevel,
+        trainingExperience,
+        trainingEnvironment,
+        role,
+        onboardingCompletedAt,
+      ];
+}
+
+class PersonalDetails extends Equatable {
+  const PersonalDetails({
+    required this.profile,
+    this.currentWeightKg,
+    this.targetWeightKg,
+    this.goalType,
+  });
+
+  final Profile profile;
+  final double? currentWeightKg;
+  final double? targetWeightKg;
+  final GoalType? goalType;
+
+  PersonalDetails copyWith({
+    Profile? profile,
+    double? currentWeightKg,
+    double? targetWeightKg,
+    GoalType? goalType,
+  }) {
+    return PersonalDetails(
+      profile: profile ?? this.profile,
+      currentWeightKg: currentWeightKg ?? this.currentWeightKg,
+      targetWeightKg: targetWeightKg ?? this.targetWeightKg,
+      goalType: goalType ?? this.goalType,
+    );
+  }
+
+  factory PersonalDetails.fromJson(Map<String, dynamic> json) {
+    return PersonalDetails(
+      profile: Profile.fromJson(Map<String, dynamic>.from(json['profile'] as Map)),
+      currentWeightKg: (json['current_weight_kg'] as num?)?.toDouble(),
+      targetWeightKg: (json['target_weight_kg'] as num?)?.toDouble(),
+      goalType: json['goal_type'] == null
+          ? null
+          : enumFromValue(goalTypeValues, json['goal_type'] as String?, GoalType.maintainWeight),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'profile': profile.toJson(),
+      'current_weight_kg': currentWeightKg,
+      'target_weight_kg': targetWeightKg,
+      'goal_type': goalType == null ? null : goalTypeValues[goalType],
+    };
+  }
+
+  @override
+  List<Object?> get props => <Object?>[profile, currentWeightKg, targetWeightKg, goalType];
 }
 
 class OnboardingDraft {

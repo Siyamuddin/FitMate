@@ -78,3 +78,32 @@ class AppActionSheet {
     );
   }
 }
+
+Future<bool> showDestructiveConfirm({
+  required BuildContext context,
+  required String title,
+  String? message,
+  required String action,
+}) async {
+  final bool? confirmed = await showCupertinoDialog<bool>(
+    context: context,
+    builder: (BuildContext context) {
+      return CupertinoAlertDialog(
+        title: Text(title),
+        content: message == null ? null : Text(message),
+        actions: <Widget>[
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(action),
+          ),
+        ],
+      );
+    },
+  );
+  return confirmed == true;
+}

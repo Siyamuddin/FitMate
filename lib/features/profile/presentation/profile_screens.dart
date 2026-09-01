@@ -2,16 +2,17 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fitmate/core/haptics/app_haptics.dart';
-import 'package:fitmate/core/networking/supabase_provider.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/core/theme/app_colors.dart';
 import 'package:fitmate/core/theme/app_spacing.dart';
 import 'package:fitmate/core/theme/app_typography.dart';
+import 'package:fitmate/core/utils/formatters.dart';
 import 'package:fitmate/core/widgets/app_scaffold.dart';
 import 'package:fitmate/core/widgets/buttons.dart';
 import 'package:fitmate/features/auth/presentation/auth_controller.dart';
+import 'package:fitmate/features/onboarding/domain/profile_models.dart';
 import 'package:fitmate/features/onboarding/presentation/onboarding_controller.dart';
 import 'package:fitmate/features/progress/presentation/progress_screen.dart';
-import 'package:fitmate/services/analytics/analytics_service.dart';
 import 'package:fitmate/services/notifications/notification_service.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -20,15 +21,38 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(currentProfileProvider);
+    final details = ref.watch(personalDetailsProvider);
     final Brightness brightness = MediaQuery.platformBrightnessOf(context);
+    final String name = profile.value?.displayName ?? 'Athlete';
+    final String experience = _experienceSummary(profile.value?.trainingExperience?.name);
+    final String personalSummary = _personalSummary(details.value);
     return AppScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('Profile')),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('Profile'),
+        trailing: ref.watch(syncStatusProvider).showNotSynced
+            ? Semantics(
+                button: true,
+                label: 'Not synced. Retry.',
+                child: CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: () => ref.read(syncEngineProvider).retry(),
+                  child: Text('Not synced', style: AppTypography.meta(AppColors.danger)),
+                ),
+              )
+            : null,
+      ),
       child: ListView(
         children: <Widget>[
           const SizedBox(height: AppSpacing.lg),
-          Text(profile.value?.displayName ?? 'Athlete', style: AppTypography.title(AppColors.ink(brightness))),
-          Text(profile.value?.trainingExperience?.name ?? '', style: AppTypography.meta(AppColors.muted(brightness))),
+          Text(name, style: AppTypography.title(AppColors.ink(brightness))),
+          if (experience.isNotEmpty)
+            Text(experience, style: AppTypography.meta(AppColors.muted(brightness))),
           const SizedBox(height: AppSpacing.lg),
+          _Row(
+            label: 'Personal Info',
+            value: personalSummary,
+            onTap: () => context.push('/personal-info'),
+          ),
           _Row(label: 'Settings', onTap: () => context.push('/settings')),
           _Row(label: 'Health', onTap: () => context.push('/health')),
           _Row(label: 'Preferences', onTap: () => context.push('/preferences')),
@@ -64,24 +88,62 @@ class ProfileScreen extends ConsumerWidget {
 }
 
 class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.onTap});
+  const _Row({required this.label, required this.onTap, this.value});
   final String label;
+  final String? value;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoButton(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-      onPressed: onTap,
-      child: Row(
-        children: <Widget>[
-          Text(label),
-          const Spacer(),
-          const Icon(CupertinoIcons.chevron_right, size: 18),
-        ],
+    final Brightness brightness = MediaQuery.platformBrightnessOf(context);
+    return Semantics(
+      button: true,
+      label: value == null || value!.isEmpty ? label : '$label, $value',
+      child: CupertinoButton(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        onPressed: onTap,
+        child: Row(
+          children: <Widget>[
+            Text(label, style: AppTypography.body(AppColors.ink(brightness))),
+            if (value != null && value!.isNotEmpty) ...<Widget>[
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  value!,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.body(AppColors.muted(brightness)),
+                ),
+              ),
+            ] else
+              const Spacer(),
+            const SizedBox(width: AppSpacing.xs),
+            Icon(CupertinoIcons.chevron_right, size: 18, color: AppColors.muted(brightness)),
+          ],
+        ),
       ),
     );
   }
+}
+
+String _experienceSummary(String? raw) {
+  if (raw == null || raw.isEmpty) {
+    return '';
+  }
+  return '${raw[0].toUpperCase()}${raw.substring(1)}';
+}
+
+String _personalSummary(PersonalDetails? details) {
+  if (details == null) {
+    return '';
+  }
+  final List<String> parts = <String>[
+    if (details.profile.age != null) '${details.profile.age}',
+    if (details.profile.heightCm != null) '${details.profile.heightCm!.round()} cm',
+    if (details.currentWeightKg != null) Formatters.kg(details.currentWeightKg!),
+  ];
+  return parts.join(' · ');
 }
 
 class SettingsScreen extends ConsumerWidget {
@@ -151,57 +213,14 @@ class PreferencesScreen extends StatelessWidget {
       navigationBar: CupertinoNavigationBar(middle: Text('Preferences')),
       child: Padding(
         padding: EdgeInsets.only(top: AppSpacing.lg),
-        child: Text('Training days, diet, and equipment can be updated with your coach.'),
+        child: Text('Change training days on the Workout tab. Diet and equipment can also be updated with your coach.'),
       ),
     );
   }
 }
 
 class WeightLogSheet {
-  static Future<void> show(BuildContext context, WidgetRef ref) async {
-    int kg = (ref.read(progressSnapshotProvider).value?.currentWeight ?? 74).round();
-    await showCupertinoModalPopup<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return Container(
-          height: 280,
-          color: AppColors.surface(MediaQuery.platformBrightnessOf(context)),
-          child: Column(
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  CupertinoButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                  const Spacer(),
-                  CupertinoButton(
-                    onPressed: () async {
-                      await SupabaseProvider.client.from('body_metrics').insert(<String, dynamic>{
-                        'user_id': SupabaseProvider.client.auth.currentUser!.id,
-                        'weight_kg': kg,
-                      });
-                      ref.read(analyticsServiceProvider).track('weight_logged');
-                      ref.invalidate(progressSnapshotProvider);
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                      }
-                    },
-                    child: const Text('Save'),
-                  ),
-                ],
-              ),
-              Expanded(
-                child: CupertinoPicker(
-                  itemExtent: 36,
-                  scrollController: FixedExtentScrollController(initialItem: kg - 40),
-                  onSelectedItemChanged: (int index) => kg = 40 + index,
-                  children: <Widget>[
-                    for (int value = 40; value <= 180; value++) Center(child: Text('$value kg')),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  static Future<void> show(BuildContext context, WidgetRef ref) {
+    return logWeightFromPicker(context, ref, ref.read(progressSnapshotProvider).value?.currentWeight);
   }
 }

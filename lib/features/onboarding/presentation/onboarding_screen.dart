@@ -9,6 +9,7 @@ import 'package:fitmate/core/theme/app_typography.dart';
 import 'package:fitmate/core/widgets/app_scaffold.dart';
 import 'package:fitmate/core/widgets/buttons.dart';
 import 'package:fitmate/core/widgets/states.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/features/onboarding/presentation/onboarding_controller.dart';
 import 'package:fitmate/services/health/health_service.dart';
 
@@ -420,6 +421,7 @@ class _GeneratingPlanScreenState extends ConsumerState<GeneratingPlanScreen> {
   Future<void> _generate() async {
     try {
       await ref.read(profileRepositoryProvider).generatePlan();
+      await ref.read(syncEngineProvider).sync();
       if (!mounted) {
         return;
       }

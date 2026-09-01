@@ -14,6 +14,7 @@ export function toolDefinitions() {
   ]
   const write = [
     'create_workout_plan',
+    'update_training_plan',
     'modify_workout_day',
     'modify_workout_exercise',
     'add_exercise',
@@ -43,7 +44,7 @@ export function toolDefinitions() {
   }))
 }
 
-export const LOW_RISK = new Set(['add_food_log', 'record_weight'])
+export const LOW_RISK = new Set(['record_weight'])
 
 export async function executeReadTool(
   supabase: SupabaseClient,

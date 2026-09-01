@@ -32,16 +32,71 @@ class SupabaseAuthRepository implements AuthRepository {
     required String password,
     String? displayName,
   }) async {
+    final String trimmedEmail = email.trim();
     try {
-      await _auth.signUp(
-        email: email.trim(),
+      final AuthResponse result = await _auth.signUp(
+        email: trimmedEmail,
         password: password,
         data: displayName == null ? null : <String, dynamic>{'display_name': displayName},
         emailRedirectTo: 'io.fitmate.app://login-callback/',
       );
+      if (result.session != null) {
+        return;
+      }
+      final User? created = result.user;
+      if (created != null && (created.identities == null || created.identities!.isEmpty)) {
+        await _signInExisting(email: trimmedEmail, password: password);
+      }
+    } on AuthException catch (error) {
+      if (_isEmailSignupDisabled(error) || _isAlreadyRegistered(error)) {
+        await _signInExisting(
+          email: trimmedEmail,
+          password: password,
+          signupDisabled: _isEmailSignupDisabled(error),
+        );
+        return;
+      }
+      throw ErrorMapper.map(error);
     } catch (error) {
       throw ErrorMapper.map(error);
     }
+  }
+
+  Future<void> _signInExisting({
+    required String email,
+    required String password,
+    bool signupDisabled = false,
+  }) async {
+    try {
+      await _auth.signInWithPassword(email: email, password: password);
+    } on AuthException catch (error) {
+      if (signupDisabled) {
+        throw const AuthFailure(
+          'Email sign-up is turned off in Supabase. Turn the Email provider on under Authentication → Sign In / Providers, then try again. If this email already has an account, use Sign in.',
+        );
+      }
+      if (_isInvalidLogin(error)) {
+        throw const AuthFailure('An account with this email already exists. Sign in instead.');
+      }
+      throw ErrorMapper.map(error);
+    } catch (error) {
+      throw ErrorMapper.map(error);
+    }
+  }
+
+  static bool _isEmailSignupDisabled(AuthException error) {
+    final String haystack = '${error.message} ${error.code ?? ''} ${error.statusCode ?? ''}'.toLowerCase();
+    return haystack.contains('email signups are disabled') ||
+        haystack.contains('email_provider_disabled') ||
+        haystack.contains('signups not allowed');
+  }
+
+  static bool _isAlreadyRegistered(AuthException error) {
+    return error.message.toLowerCase().contains('already registered');
+  }
+
+  static bool _isInvalidLogin(AuthException error) {
+    return error.message.toLowerCase().contains('invalid login');
   }
 
   @override

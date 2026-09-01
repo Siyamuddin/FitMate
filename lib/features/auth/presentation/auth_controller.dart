@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/features/auth/data/supabase_auth_repository.dart';
 import 'package:fitmate/features/auth/domain/auth_repository.dart';
 
@@ -41,8 +42,9 @@ class AuthController extends AutoDisposeAsyncNotifier<void> {
     });
   }
 
-  Future<void> signOut() {
-    return ref.read(authRepositoryProvider).signOut();
+  Future<void> signOut() async {
+    await ref.read(syncEngineProvider).clear();
+    await ref.read(authRepositoryProvider).signOut();
   }
 }
 

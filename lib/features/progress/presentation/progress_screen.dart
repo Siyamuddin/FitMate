@@ -1,56 +1,30 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fitmate/core/networking/supabase_provider.dart';
+import 'package:fitmate/core/haptics/app_haptics.dart';
+import 'package:fitmate/core/local/snapshot_keys.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/core/theme/app_spacing.dart';
 import 'package:fitmate/core/utils/fitness_calc.dart';
 import 'package:fitmate/core/widgets/app_scaffold.dart';
 import 'package:fitmate/core/widgets/cards.dart';
 import 'package:fitmate/core/widgets/chart_card.dart';
+import 'package:fitmate/core/widgets/picker_sheet.dart';
 import 'package:fitmate/core/widgets/states.dart';
+import 'package:fitmate/features/nutrition/presentation/nutrition_screen.dart';
+import 'package:fitmate/features/onboarding/presentation/onboarding_controller.dart';
+import 'package:fitmate/features/progress/domain/progress_snapshot.dart';
+import 'package:fitmate/services/analytics/analytics_service.dart';
 
-class ProgressSnapshot {
-  const ProgressSnapshot({
-    required this.weights,
-    this.currentWeight,
-    this.targetWeight,
-    this.workoutsThisWeek = 0,
-    this.workoutsPlanned = 0,
-  });
-
-  final List<double> weights;
-  final double? currentWeight;
-  final double? targetWeight;
-  final int workoutsThisWeek;
-  final int workoutsPlanned;
-}
+export 'package:fitmate/features/progress/domain/progress_snapshot.dart';
 
 final progressSnapshotProvider = FutureProvider<ProgressSnapshot>((Ref ref) async {
-  final List<dynamic> metrics = await SupabaseProvider.client
-      .from('body_metrics')
-      .select('weight_kg, recorded_at')
-      .order('recorded_at')
-      .limit(30);
-  final List<double> weights = metrics
-      .map((dynamic row) => ((row as Map)['weight_kg'] as num).toDouble())
-      .toList();
-  final dynamic goal = await SupabaseProvider.client
-      .from('fitness_goals')
-      .select('target_weight_kg')
-      .eq('is_active', true)
-      .maybeSingle();
-  final DateTime weekAgo = DateTime.now().toUtc().subtract(const Duration(days: 7));
-  final List<dynamic> sessions = await SupabaseProvider.client
-      .from('workout_sessions')
-      .select('id')
-      .eq('status', 'completed')
-      .gte('started_at', weekAgo.toIso8601String());
-  return ProgressSnapshot(
-    weights: weights,
-    currentWeight: weights.isEmpty ? null : weights.last,
-    targetWeight: goal == null ? null : ((goal as Map)['target_weight_kg'] as num?)?.toDouble(),
-    workoutsThisWeek: sessions.length,
-    workoutsPlanned: 4,
-  );
+  ref.watch(localEpochProvider);
+  await ref.read(localStoreProvider).ensureReady();
+  final Map<String, dynamic>? json = await ref.read(localStoreProvider).getJson(SnapshotKeys.progress);
+  if (json != null) {
+    return ProgressSnapshot.fromJson(json);
+  }
+  return const ProgressSnapshot(weights: <double>[]);
 });
 
 class ProgressScreen extends ConsumerWidget {
@@ -60,8 +34,21 @@ class ProgressScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<ProgressSnapshot> snapshot = ref.watch(progressSnapshotProvider);
     return AppScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('Progress')),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('Progress'),
+        trailing: Semantics(
+          button: true,
+          label: 'Log weight',
+          child: CupertinoButton(
+            padding: EdgeInsets.zero,
+            onPressed: () => logWeightFromPicker(context, ref, snapshot.value?.currentWeight),
+            child: const Text('Log'),
+          ),
+        ),
+      ),
       child: snapshot.when(
+        skipLoadingOnReload: true,
+        skipLoadingOnRefresh: true,
         loading: () => const LoadingState(),
         error: (Object error, _) => ErrorState(message: error.toString(), onRetry: () => ref.refresh(progressSnapshotProvider)),
         data: (ProgressSnapshot data) {
@@ -87,7 +74,7 @@ class ProgressScreen extends ConsumerWidget {
                 title: 'Weight',
                 values: data.weights,
                 emptyTitle: 'Log weight',
-                emptyMessage: 'A chart appears after two weigh-ins.',
+                emptyMessage: 'A chart appears after two weigh-ins. Use Log in the top right.',
               ),
               const SizedBox(height: AppSpacing.lg),
               ProgressCard(
@@ -106,6 +93,45 @@ class ProgressScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+}
+
+Future<void> logWeightFromPicker(BuildContext context, WidgetRef ref, double? currentWeight) async {
+  final int? kg = await showIntPicker(
+    context: context,
+    title: 'Weight',
+    min: 40,
+    max: 180,
+    current: (currentWeight ?? 74).round(),
+    suffix: ' kg',
+  );
+  if (kg == null) {
+    return;
+  }
+  try {
+    await ref.read(profileRepositoryProvider).logWeight(kg.toDouble());
+    ref.read(analyticsServiceProvider).track('weight_logged');
+    ref.invalidate(currentProfileProvider);
+    ref.invalidate(personalDetailsProvider);
+    ref.invalidate(progressSnapshotProvider);
+    ref.invalidate(todayNutritionProvider);
+    AppHaptics.confirmation();
+  } catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return CupertinoAlertDialog(
+          title: const Text('Could not save'),
+          content: Text('$error'),
+          actions: <Widget>[
+            CupertinoDialogAction(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          ],
+        );
+      },
     );
   }
 }

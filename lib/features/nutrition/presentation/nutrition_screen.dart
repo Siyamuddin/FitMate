@@ -9,19 +9,27 @@ import 'package:fitmate/core/widgets/buttons.dart';
 import 'package:fitmate/core/widgets/cards.dart';
 import 'package:fitmate/core/widgets/food_row.dart';
 import 'package:fitmate/core/widgets/states.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/features/nutrition/data/nutrition_repository.dart';
 import 'package:fitmate/services/analytics/analytics_service.dart';
 
 final nutritionRepositoryProvider = Provider<NutritionRepository>((Ref ref) {
-  return NutritionRepository();
+  return NutritionRepository(
+    store: ref.read(localStoreProvider),
+    onChanged: () => notifyLocalChange(ref),
+  );
 });
 
-final todayNutritionProvider = FutureProvider<DailyNutrition>((Ref ref) {
-  return ref.watch(nutritionRepositoryProvider).today();
+final todayNutritionProvider = FutureProvider<DailyNutrition>((Ref ref) async {
+  ref.watch(localEpochProvider);
+  await ref.read(localStoreProvider).ensureReady();
+  return ref.read(nutritionRepositoryProvider).today();
 });
 
-final todayFoodLogsProvider = FutureProvider<List<FoodLog>>((Ref ref) {
-  return ref.watch(nutritionRepositoryProvider).todayLogs();
+final todayFoodLogsProvider = FutureProvider<List<FoodLog>>((Ref ref) async {
+  ref.watch(localEpochProvider);
+  await ref.read(localStoreProvider).ensureReady();
+  return ref.read(nutritionRepositoryProvider).todayLogs();
 });
 
 class NutritionScreen extends ConsumerWidget {
@@ -34,6 +42,8 @@ class NutritionScreen extends ConsumerWidget {
     return AppScaffold(
       navigationBar: const CupertinoNavigationBar(middle: Text('Nutrition')),
       child: today.when(
+        skipLoadingOnReload: true,
+        skipLoadingOnRefresh: true,
         loading: () => const LoadingState(),
         error: (Object error, _) => ErrorState(message: error.toString(), onRetry: () => ref.refresh(todayNutritionProvider)),
         data: (DailyNutrition data) {
@@ -121,6 +131,7 @@ class _FoodSearchSheetState extends ConsumerState<FoodSearchSheet> {
   Food? _selected;
   double _quantity = 100;
   String _slot = 'lunch';
+  String? _searchError;
 
   @override
   void dispose() {
@@ -132,8 +143,20 @@ class _FoodSearchSheetState extends ConsumerState<FoodSearchSheet> {
     if (value.trim().length < 2) {
       return;
     }
-    final List<Food> results = await ref.read(nutritionRepositoryProvider).search(value.trim());
-    setState(() => _results = results);
+    try {
+      final List<Food> results = await ref.read(nutritionRepositoryProvider).search(
+        value.trim(),
+        online: ref.read(syncStatusProvider).online,
+      );
+      setState(() {
+        _results = results;
+        _searchError = results.isEmpty && !ref.read(syncStatusProvider).online
+            ? 'Connect to search foods'
+            : null;
+      });
+    } catch (error) {
+      setState(() => _searchError = error.toString());
+    }
   }
 
   @override
@@ -152,6 +175,13 @@ class _FoodSearchSheetState extends ConsumerState<FoodSearchSheet> {
             Text('Log food', style: AppTypography.title(AppColors.ink(brightness))),
             const SizedBox(height: AppSpacing.md),
             AppTextField(controller: _query, placeholder: 'Search foods', onSubmitted: _search),
+            if (_searchError != null) ...<Widget>[
+              const SizedBox(height: AppSpacing.sm),
+              Semantics(
+                liveRegion: true,
+                child: Text(_searchError!, style: AppTypography.meta(AppColors.muted(brightness))),
+              ),
+            ],
             const SizedBox(height: AppSpacing.sm),
             Expanded(
               child: ListView(

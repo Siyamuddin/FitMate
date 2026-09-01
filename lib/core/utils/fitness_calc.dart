@@ -16,6 +16,28 @@ class NutritionTargets {
   final double proteinG;
   final double carbohydratesG;
   final double fatG;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'bmr': bmr,
+      'tdee': tdee,
+      'calories': calories,
+      'protein_g': proteinG,
+      'carbohydrates_g': carbohydratesG,
+      'fat_g': fatG,
+    };
+  }
+
+  factory NutritionTargets.fromJson(Map<String, dynamic> json) {
+    return NutritionTargets(
+      bmr: (json['bmr'] as num?)?.toDouble() ?? 0,
+      tdee: (json['tdee'] as num?)?.toDouble() ?? 0,
+      calories: json['calories'] as int? ?? 0,
+      proteinG: (json['protein_g'] as num?)?.toDouble() ?? 0,
+      carbohydratesG: (json['carbohydrates_g'] as num?)?.toDouble() ?? 0,
+      fatG: (json['fat_g'] as num?)?.toDouble() ?? 0,
+    );
+  }
 }
 
 class FitnessCalculator {

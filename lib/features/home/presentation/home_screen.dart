@@ -30,6 +30,8 @@ class HomeScreen extends ConsumerWidget {
     final Brightness brightness = MediaQuery.platformBrightnessOf(context);
 
     return profile.when(
+      skipLoadingOnReload: true,
+      skipLoadingOnRefresh: true,
       loading: () => const AppScaffold(child: LoadingState()),
       error: (Object error, _) => AppScaffold(child: ErrorState(message: error.toString())),
       data: (profileData) {

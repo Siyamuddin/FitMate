@@ -1,4 +1,7 @@
+import 'package:uuid/uuid.dart';
 import 'package:fitmate/core/errors/error_mapper.dart';
+import 'package:fitmate/core/local/local_store.dart';
+import 'package:fitmate/core/local/snapshot_keys.dart';
 import 'package:fitmate/core/networking/supabase_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -39,6 +42,20 @@ class Food {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'name': name,
+      'brand': brand,
+      'serving_size': servingSize,
+      'serving_unit': servingUnit,
+      'calories': calories,
+      'protein': protein,
+      'carbohydrates': carbohydrates,
+      'fat': fat,
+    };
+  }
+
   Food scaled(double quantity) {
     final double factor = quantity / servingSize;
     return Food(
@@ -71,6 +88,46 @@ class DailyNutrition {
   final double fat;
   final int? calorieTarget;
   final double? proteinTarget;
+
+  DailyNutrition copyWith({
+    double? calories,
+    double? protein,
+    double? carbohydrates,
+    double? fat,
+    int? calorieTarget,
+    double? proteinTarget,
+  }) {
+    return DailyNutrition(
+      calories: calories ?? this.calories,
+      protein: protein ?? this.protein,
+      carbohydrates: carbohydrates ?? this.carbohydrates,
+      fat: fat ?? this.fat,
+      calorieTarget: calorieTarget ?? this.calorieTarget,
+      proteinTarget: proteinTarget ?? this.proteinTarget,
+    );
+  }
+
+  factory DailyNutrition.fromJson(Map<String, dynamic> json) {
+    return DailyNutrition(
+      calories: (json['calories'] as num?)?.toDouble() ?? 0,
+      protein: (json['protein'] as num?)?.toDouble() ?? 0,
+      carbohydrates: (json['carbohydrates'] as num?)?.toDouble() ?? 0,
+      fat: (json['fat'] as num?)?.toDouble() ?? 0,
+      calorieTarget: json['calorie_target'] as int? ?? (json['calories_target'] as int?),
+      proteinTarget: (json['protein_target'] as num?)?.toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'calories': calories,
+      'protein': protein,
+      'carbohydrates': carbohydrates,
+      'fat': fat,
+      'calorie_target': calorieTarget,
+      'protein_target': proteinTarget,
+    };
+  }
 }
 
 class FoodLog {
@@ -89,32 +146,113 @@ class FoodLog {
   final double calories;
   final double protein;
   final double quantity;
+
+  factory FoodLog.fromJson(Map<String, dynamic> json) {
+    return FoodLog(
+      id: json['id'] as String,
+      foodName: json['food_name'] as String? ?? (json['foods'] as Map?)?['name'] as String? ?? 'Food',
+      mealSlot: json['meal_slot'] as String,
+      calories: (json['calories'] as num).toDouble(),
+      protein: (json['protein'] as num).toDouble(),
+      quantity: (json['quantity'] as num).toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'food_name': foodName,
+      'meal_slot': mealSlot,
+      'calories': calories,
+      'protein': protein,
+      'quantity': quantity,
+    };
+  }
 }
 
 class NutritionRepository {
-  NutritionRepository({SupabaseClient? client}) : _client = client ?? SupabaseProvider.client;
+  NutritionRepository({
+    required LocalStore store,
+    VoidCallback? onChanged,
+    SupabaseClient? client,
+  })  : _store = store,
+        _onChanged = onChanged,
+        _client = client ?? SupabaseProvider.client;
 
+  final LocalStore _store;
+  final VoidCallback? _onChanged;
   final SupabaseClient _client;
 
-  Future<List<Food>> search(String query) async {
-    try {
-      final List<dynamic> rows = await _client
-          .from('foods')
-          .select()
-          .ilike('name', '%$query%')
-          .eq('is_active', true)
-          .limit(30);
-      return rows.map((dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map))).toList();
-    } catch (error) {
-      throw ErrorMapper.map(error);
+  Future<List<Food>> cachedFoods() async {
+    await _store.ensureReady();
+    final List<dynamic>? rows = await _store.getList(SnapshotKeys.foodsCache);
+    if (rows == null) {
+      return <Food>[];
     }
+    return rows.map((dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map))).toList();
+  }
+
+  Future<List<Food>> search(String query, {required bool online}) async {
+    final String needle = query.trim().toLowerCase();
+    final List<Food> cached = await cachedFoods();
+    List<Food> matches = cached.where((Food food) => food.name.toLowerCase().contains(needle)).take(30).toList();
+    if (online) {
+      try {
+        final List<dynamic> rows = await _client
+            .from('foods')
+            .select()
+            .ilike('name', '%$query%')
+            .eq('is_active', true)
+            .limit(30);
+        final List<Food> remote = rows.map((dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map))).toList();
+        final Map<String, Food> byId = <String, Food>{
+          for (final Food food in cached) food.id: food,
+          for (final Food food in remote) food.id: food,
+        };
+        await _store.setList(SnapshotKeys.foodsCache, byId.values.map((Food food) => food.toJson()).toList());
+        matches = remote;
+        _onChanged?.call();
+      } catch (error) {
+        if (matches.isEmpty) {
+          throw ErrorMapper.map(error);
+        }
+      }
+    }
+    return matches;
   }
 
   Future<void> logFood({required Food food, required String mealSlot, required double quantity}) async {
     final Food scaled = food.scaled(quantity);
-    try {
-      await _client.from('food_logs').insert(<String, dynamic>{
-        'user_id': _client.auth.currentUser!.id,
+    final String id = const Uuid().v4();
+    final FoodLog log = FoodLog(
+      id: id,
+      foodName: food.name,
+      mealSlot: mealSlot,
+      calories: scaled.calories,
+      protein: scaled.protein,
+      quantity: quantity,
+    );
+    final List<FoodLog> logs = await todayLogs();
+    logs.add(log);
+    await _store.setList(SnapshotKeys.foodLogsToday, logs.map((FoodLog item) => item.toJson()).toList());
+    final DailyNutrition today = await this.today();
+    await _store.setJson(
+      SnapshotKeys.todayNutrition,
+      today
+          .copyWith(
+            calories: today.calories + scaled.calories,
+            protein: today.protein + scaled.protein,
+            carbohydrates: today.carbohydrates + scaled.carbohydrates,
+            fat: today.fat + scaled.fat,
+          )
+          .toJson(),
+    );
+    await _store.enqueue(
+      type: OutboxType.insertFoodLog,
+      entity: SnapshotKeys.foodLogsToday,
+      payload: <String, dynamic>{
+        'id': id,
+        'user_id': _client.auth.currentUser?.id,
         'food_id': food.id,
         'meal_slot': mealSlot,
         'quantity': quantity,
@@ -124,67 +262,70 @@ class NutritionRepository {
         'carbohydrates': scaled.carbohydrates,
         'fat': scaled.fat,
         'source': 'manual',
-      });
-    } catch (error) {
-      throw ErrorMapper.map(error);
-    }
+        'logged_at': DateTime.now().toUtc().toIso8601String(),
+      },
+    );
+    _onChanged?.call();
   }
 
   Future<DailyNutrition> today() async {
-    final DateTime now = DateTime.now().toUtc();
-    final String date = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    try {
-      final dynamic row = await _client.from('nutrition_daily_logs').select().eq('log_date', date).maybeSingle();
-      final dynamic targets = await _client.from('nutrition_targets').select().maybeSingle();
-      if (row == null) {
-        return DailyNutrition(
-          calories: 0,
-          protein: 0,
-          carbohydrates: 0,
-          fat: 0,
-          calorieTarget: targets == null ? null : (targets as Map)['calories'] as int?,
-          proteinTarget: targets == null ? null : ((targets as Map)['protein_g'] as num?)?.toDouble(),
-        );
-      }
-      final Map<String, dynamic> json = Map<String, dynamic>.from(row as Map);
-      return DailyNutrition(
-        calories: (json['calories'] as num).toDouble(),
-        protein: (json['protein'] as num).toDouble(),
-        carbohydrates: (json['carbohydrates'] as num).toDouble(),
-        fat: (json['fat'] as num).toDouble(),
-        calorieTarget: json['calorie_target'] as int? ?? (targets == null ? null : (targets as Map)['calories'] as int?),
-        proteinTarget: (json['protein_target'] as num?)?.toDouble(),
-      );
-    } catch (error) {
-      throw ErrorMapper.map(error);
+    await _store.ensureReady();
+    final Map<String, dynamic>? json = await _store.getJson(SnapshotKeys.todayNutrition);
+    if (json != null) {
+      return DailyNutrition.fromJson(json);
     }
+    final Map<String, dynamic>? targets = await _store.getJson(SnapshotKeys.nutritionTargets);
+    return DailyNutrition(
+      calories: 0,
+      protein: 0,
+      carbohydrates: 0,
+      fat: 0,
+      calorieTarget: targets?['calories'] as int?,
+      proteinTarget: (targets?['protein_g'] as num?)?.toDouble(),
+    );
   }
 
   Future<List<FoodLog>> todayLogs() async {
-    final DateTime start = DateTime.now().toUtc().subtract(Duration(hours: DateTime.now().toUtc().hour, minutes: DateTime.now().toUtc().minute));
-    try {
-      final List<dynamic> rows = await _client
-          .from('food_logs')
-          .select('id, quantity, calories, protein, meal_slot, foods(name)')
-          .gte('logged_at', start.toIso8601String())
-          .order('logged_at');
-      return rows.map((dynamic row) {
-        final Map<String, dynamic> json = Map<String, dynamic>.from(row as Map);
-        return FoodLog(
-          id: json['id'] as String,
-          foodName: (json['foods'] as Map?)?['name'] as String? ?? 'Food',
-          mealSlot: json['meal_slot'] as String,
-          calories: (json['calories'] as num).toDouble(),
-          protein: (json['protein'] as num).toDouble(),
-          quantity: (json['quantity'] as num).toDouble(),
-        );
-      }).toList();
-    } catch (error) {
-      throw ErrorMapper.map(error);
+    await _store.ensureReady();
+    final List<dynamic>? rows = await _store.getList(SnapshotKeys.foodLogsToday);
+    if (rows == null) {
+      return <FoodLog>[];
     }
+    return rows.map((dynamic row) => FoodLog.fromJson(Map<String, dynamic>.from(row as Map))).toList();
   }
 
   Future<void> deleteLog(String id) async {
-    await _client.from('food_logs').delete().eq('id', id);
+    final List<FoodLog> logs = await todayLogs();
+    FoodLog? removed;
+    final List<FoodLog> next = <FoodLog>[];
+    for (final FoodLog log in logs) {
+      if (log.id == id) {
+        removed = log;
+      } else {
+        next.add(log);
+      }
+    }
+    await _store.setList(SnapshotKeys.foodLogsToday, next.map((FoodLog item) => item.toJson()).toList());
+    if (removed != null) {
+      final DailyNutrition today = await this.today();
+      await _store.setJson(
+        SnapshotKeys.todayNutrition,
+        today
+            .copyWith(
+              calories: (today.calories - removed.calories).clamp(0, double.infinity),
+              protein: (today.protein - removed.protein).clamp(0, double.infinity),
+            )
+            .toJson(),
+      );
+    }
+    await _store.enqueue(
+      type: OutboxType.deleteFoodLog,
+      entity: SnapshotKeys.foodLogsToday,
+      payload: <String, dynamic>{'id': id},
+    );
+    _onChanged?.call();
   }
 }
+
+typedef VoidCallback = void Function();
+

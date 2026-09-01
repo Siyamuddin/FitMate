@@ -4,6 +4,7 @@ import { buildContext } from '../_shared/context.ts'
 import { chatJson } from '../_shared/openai.ts'
 import { failClosedMessage, sanitizeUserMessage } from '../_shared/safety.ts'
 import { LOW_RISK } from '../_shared/tools.ts'
+import { APPLIABLE_ACTIONS, honestCoachMessage } from '../_shared/honesty.ts'
 import { enforceRateLimit, recordUsage } from '../_shared/usage.ts'
 
 Deno.serve(async (req) => {
@@ -39,35 +40,50 @@ Deno.serve(async (req) => {
       model: config?.model ?? prompt?.model ?? 'gpt-5.6-luna',
       temperature: Number(config?.temperature ?? 0.4),
       maxTokens: config?.max_output_tokens ?? 1200,
-      system: `${prompt?.system_prompt ?? ''}\n${prompt?.coach_instruction ?? 'Return JSON with keys: message, requires_confirmation, actions (array of {type, target_id, changes}).'}`,
+      system: `${prompt?.system_prompt ?? ''}\n${prompt?.coach_instruction ?? 'Return JSON with keys: message, requires_confirmation, actions (array of {type, target_id, changes}).'}\nNever say you updated, saved, or applied a plan change. High-risk changes (training days, workouts, goals) are proposals only until the user taps Apply. Allowed action types: update_training_plan, modify_workout_day, modify_workout_exercise, update_goal, record_weight. For weekly training days, use update_training_plan with the active plan id and changes.days_per_week. To add a day, include add_workout_day { name, weekday, exercises: [{ exercise_id, sets, reps, rest_seconds }] } using only provided exercise IDs. To drop a day, include remove_workout_day_id with that day's id.`,
       user: JSON.stringify({ message, context }),
     })
 
-    const actions = Array.isArray(result.parsed.actions) ? result.parsed.actions : []
-    const requiresConfirmation = result.parsed.requires_confirmation !== false && actions.some((action: { type?: string }) => !LOW_RISK.has(action.type ?? ''))
+    const rawActions = Array.isArray(result.parsed.actions) ? result.parsed.actions as Record<string, unknown>[] : []
+    const actions = rawActions.filter((action) => APPLIABLE_ACTIONS.has(String(action.type ?? '')))
+    const droppedUnsupported = rawActions.length > actions.length
+    const requiresConfirmation = actions.some((action) => !LOW_RISK.has(String(action.type ?? '')))
+
+    let applied = false
+    if (!requiresConfirmation && actions.length) {
+      applied = await applyLowRisk(supabase, user.id, actions)
+    }
+
+    const messageText = honestCoachMessage({
+      message: String(result.parsed.message ?? ''),
+      requiresConfirmation,
+      applied,
+      droppedUnsupported,
+    })
 
     const { data: assistant } = await supabase.from('ai_messages').insert({
       conversation_id: conversationId,
       role: 'assistant',
-      content: result.parsed,
+      content: {
+        ...result.parsed,
+        message: messageText,
+        requires_confirmation: requiresConfirmation,
+        actions,
+        applied,
+      },
       prompt_version_id: prompt?.id ?? null,
     }).select('id').single()
 
     if (actions.length) {
-      await supabase.from('ai_actions').insert(actions.map((action: Record<string, unknown>) => ({
+      await supabase.from('ai_actions').insert(actions.map((action) => ({
         conversation_id: conversationId,
         message_id: assistant?.id,
         action_type: action.type,
         arguments: action,
-        status: requiresConfirmation ? 'proposed' : 'executed',
+        status: requiresConfirmation ? 'proposed' : applied ? 'executed' : 'failed',
         requires_confirmation: requiresConfirmation,
+        result: applied ? { ok: true } : requiresConfirmation ? null : { ok: false },
       })))
-    }
-
-    if (!requiresConfirmation) {
-      for (const action of actions) {
-        await applyAction(supabase, user.id, action)
-      }
     }
 
     await recordUsage(admin, {
@@ -80,9 +96,10 @@ Deno.serve(async (req) => {
     })
 
     return json({
-      message: result.parsed.message ?? 'I am here to help with your training.',
+      message: messageText,
       requires_confirmation: requiresConfirmation,
-      actions,
+      applied,
+      actions: requiresConfirmation ? actions : [],
       conversation_id: conversationId,
     })
   } catch (error) {
@@ -94,11 +111,20 @@ Deno.serve(async (req) => {
   }
 })
 
-async function applyAction(supabase: ReturnType<typeof requireUser> extends Promise<infer T> ? T extends { supabase: infer S } ? S : never : never, userId: string, action: Record<string, unknown>) {
-  if (action.type === 'record_weight' && action.changes && typeof action.changes === 'object') {
-    const weight = Number((action.changes as { weight_kg?: number }).weight_kg)
-    if (weight >= 30 && weight <= 400) {
-      await supabase.from('body_metrics').insert({ user_id: userId, weight_kg: weight })
-    }
+async function applyLowRisk(
+  supabase: ReturnType<typeof requireUser> extends Promise<infer T> ? T extends { supabase: infer S } ? S : never : never,
+  userId: string,
+  actions: Record<string, unknown>[],
+) {
+  let saved = false
+  for (const action of actions) {
+    if (action.type !== 'record_weight') continue
+    const changes = action.changes && typeof action.changes === 'object' ? action.changes as { weight_kg?: number } : {}
+    const weight = Number(changes.weight_kg)
+    if (weight < 30 || weight > 400) continue
+    const { error } = await supabase.from('body_metrics').insert({ user_id: userId, weight_kg: weight })
+    if (error) throw error
+    saved = true
   }
+  return saved
 }

@@ -53,11 +53,13 @@ class AIActionCard extends StatelessWidget {
     required this.summary,
     required this.onApply,
     required this.onDismiss,
+    this.applying = false,
   });
 
   final String summary;
   final VoidCallback onApply;
   final VoidCallback onDismiss;
+  final bool applying;
 
   @override
   Widget build(BuildContext context) {
@@ -73,12 +75,14 @@ class AIActionCard extends StatelessWidget {
           Row(
             children: <Widget>[
               CupertinoButton(
-                onPressed: onApply,
-                child: const Text('Apply'),
+                onPressed: applying ? null : onApply,
+                child: applying
+                    ? const CupertinoActivityIndicator()
+                    : Semantics(button: true, label: 'Apply recommended change', child: const Text('Apply')),
               ),
               CupertinoButton(
-                onPressed: onDismiss,
-                child: const Text('Dismiss'),
+                onPressed: applying ? null : onDismiss,
+                child: Semantics(button: true, label: 'Not now', child: const Text('Not now')),
               ),
             ],
           ),

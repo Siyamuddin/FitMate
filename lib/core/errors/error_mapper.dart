@@ -9,7 +9,14 @@ class ErrorMapper {
       return error;
     }
     if (error is AuthException) {
-      return AuthFailure(_authMessage(error.message), code: error.statusCode);
+      final String lower = error.message.toLowerCase();
+      if (error.statusCode == '429' || lower.contains('rate limit')) {
+        return AuthFailure(
+          'Too many sign-up emails were sent. Wait a minute, then Sign in if the account already exists.',
+          code: error.statusCode,
+        );
+      }
+      return AuthFailure(_authMessage(error.message, error.code), code: error.statusCode);
     }
     if (error is FunctionException) {
       if (error.status == 429) {
@@ -23,13 +30,18 @@ class ErrorMapper {
     return const NetworkFailure();
   }
 
-  static String _authMessage(String raw) {
-    final String lower = raw.toLowerCase();
+  static String _authMessage(String raw, String? code) {
+    final String lower = '${raw.toLowerCase()} ${code ?? ''}'.toLowerCase();
+    if (lower.contains('email signups are disabled') ||
+        lower.contains('email_provider_disabled') ||
+        lower.contains('signups not allowed')) {
+      return 'Email sign-up is turned off in Supabase. Enable the Email provider under Authentication → Sign In / Providers. If you already created this email, use Sign in.';
+    }
     if (lower.contains('invalid login')) {
       return 'Email or password is incorrect.';
     }
     if (lower.contains('already registered')) {
-      return 'An account with this email already exists.';
+      return 'An account with this email already exists. Sign in instead.';
     }
     if (lower.contains('email not confirmed')) {
       return 'Check your email to confirm your account.';

@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:fitmate/core/theme/app_colors.dart';
 import 'package:fitmate/core/theme/app_spacing.dart';
 import 'package:fitmate/core/theme/app_typography.dart';
@@ -67,12 +68,14 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
           if (error != null) Text(error, style: AppTypography.meta(AppColors.danger)),
-          if (auth.hasValue && !auth.isLoading && !auth.hasError)
-            Text('Check your email if confirmation is required.', style: AppTypography.meta(AppColors.muted(brightness))),
           const SizedBox(height: AppSpacing.lg),
           PrimaryButton(
             label: auth.isLoading ? 'Creating account…' : 'Create account',
             onPressed: auth.isLoading ? null : _handleSignUp,
+          ),
+          CupertinoButton(
+            onPressed: () => context.go('/sign-in'),
+            child: const Text('Already have an account? Sign in'),
           ),
         ],
       ),

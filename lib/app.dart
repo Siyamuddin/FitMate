@@ -1,8 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fitmate/core/routing/app_router.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/core/theme/app_theme.dart';
-import 'package:fitmate/services/connectivity/connectivity_service.dart';
 
 class FitMateApp extends ConsumerStatefulWidget {
   const FitMateApp({super.key});
@@ -15,7 +15,7 @@ class _FitMateAppState extends ConsumerState<FitMateApp> {
   @override
   void initState() {
     super.initState();
-    Future<void>.microtask(() => ref.read(connectivityServiceProvider).flushOutbox());
+    Future<void>.microtask(() => ref.read(syncEngineProvider).start());
   }
 
   @override

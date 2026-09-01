@@ -16,12 +16,19 @@ class EdgeFunctions {
       throw const RateLimitFailure();
     }
     if (response.status >= 400) {
+      final dynamic data = response.data;
+      if (data is Map && data['error'] != null) {
+        throw AppException(data['error'].toString(), code: '${response.status}');
+      }
       throw AppException(
         'Could not complete that request.',
         code: '${response.status}',
       );
     }
     final dynamic data = response.data;
+    if (data is Map && data['error'] != null) {
+      throw AppException(data['error'].toString());
+    }
     if (data is Map<String, dynamic>) {
       return data;
     }

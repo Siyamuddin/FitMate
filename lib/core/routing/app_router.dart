@@ -14,6 +14,7 @@ import 'package:fitmate/features/nutrition/presentation/nutrition_screen.dart';
 import 'package:fitmate/features/onboarding/presentation/onboarding_controller.dart';
 import 'package:fitmate/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:fitmate/features/health/presentation/health_connections_screen.dart';
+import 'package:fitmate/features/profile/presentation/personal_info_screen.dart';
 import 'package:fitmate/features/profile/presentation/profile_screens.dart';
 import 'package:fitmate/features/progress/presentation/progress_screen.dart';
 import 'package:fitmate/features/workout/presentation/active_workout_screen.dart';
@@ -84,6 +85,7 @@ final routerProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(path: '/workout-complete', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: WorkoutCompleteScreen())),
       GoRoute(path: '/workout-history', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: WorkoutHistoryScreen())),
       GoRoute(path: '/profile', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: ProfileScreen())),
+      GoRoute(path: '/personal-info', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: PersonalInfoScreen())),
       GoRoute(path: '/settings', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: SettingsScreen())),
       GoRoute(path: '/health', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: HealthConnectionsScreen())),
       GoRoute(path: '/preferences', pageBuilder: (BuildContext context, GoRouterState state) => const CupertinoPage<void>(child: PreferencesScreen())),

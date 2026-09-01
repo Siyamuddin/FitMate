@@ -1,14 +1,26 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fitmate/core/constants/enums.dart';
+import 'package:fitmate/core/sync/sync_engine.dart';
 import 'package:fitmate/features/onboarding/data/profile_repository.dart';
 import 'package:fitmate/features/onboarding/domain/profile_models.dart';
 
 final profileRepositoryProvider = Provider<ProfileRepository>((Ref ref) {
-  return ProfileRepository();
+  return ProfileRepository(
+    store: ref.read(localStoreProvider),
+    onChanged: () => notifyLocalChange(ref),
+  );
 });
 
 final currentProfileProvider = FutureProvider<Profile?>((Ref ref) async {
-  return ref.watch(profileRepositoryProvider).fetchCurrent();
+  ref.watch(localEpochProvider);
+  await ref.read(localStoreProvider).ensureReady();
+  return ref.read(profileRepositoryProvider).fetchCurrent();
+});
+
+final personalDetailsProvider = FutureProvider<PersonalDetails?>((Ref ref) async {
+  ref.watch(localEpochProvider);
+  await ref.read(localStoreProvider).ensureReady();
+  return ref.read(profileRepositoryProvider).fetchPersonalDetails();
 });
 
 class OnboardingController extends Notifier<OnboardingDraft> {

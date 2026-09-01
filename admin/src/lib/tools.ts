@@ -11,6 +11,7 @@ export const READ_TOOLS = [
 
 export const WRITE_TOOLS = [
   'create_workout_plan',
+  'update_training_plan',
   'modify_workout_day',
   'modify_workout_exercise',
   'add_exercise',
