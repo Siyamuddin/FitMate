@@ -20,11 +20,14 @@ Deno.serve(async (req) => {
     const context = await buildContext(supabase, user.id)
     const { data: prompt } = await admin.from('ai_prompt_versions').select('*').eq('is_active', true).maybeSingle()
 
-    let conversationId = body.conversation_id as string | undefined
+    const startFresh = body.new_conversation === true
+    let conversationId = startFresh ? undefined : body.conversation_id as string | undefined
     if (!conversationId) {
-      const { data: existing } = await supabase.from('ai_conversations').select('id').order('updated_at', { ascending: false }).limit(1).maybeSingle()
-      if (existing) conversationId = existing.id
-      else {
+      if (!startFresh) {
+        const { data: existing } = await supabase.from('ai_conversations').select('id').order('updated_at', { ascending: false }).limit(1).maybeSingle()
+        if (existing) conversationId = existing.id
+      }
+      if (!conversationId) {
         const { data: created } = await supabase.from('ai_conversations').insert({ user_id: user.id, title: 'Coach' }).select('id').single()
         conversationId = created?.id
       }
