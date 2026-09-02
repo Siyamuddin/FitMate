@@ -21,8 +21,10 @@ export const WRITE_TOOLS = [
   'create_meal_plan',
   'modify_meal_plan',
   'add_food_log',
+  'update_nutrition_targets',
   'update_goal',
   'record_weight',
+  'update_profile',
 ] as const
 
 export const MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as const

@@ -17,9 +17,9 @@ class ProfileRepository {
     required LocalStore store,
     VoidCallback? onChanged,
     SupabaseClient? client,
-  })  : _store = store,
-        _onChanged = onChanged,
-        _client = client ?? SupabaseProvider.client;
+  }) : _store = store,
+       _onChanged = onChanged,
+       _client = client ?? SupabaseProvider.client;
 
   final LocalStore _store;
   final VoidCallback? _onChanged;
@@ -46,7 +46,9 @@ class ProfileRepository {
 
   Future<Profile?> fetchCurrent() async {
     await _store.ensureReady();
-    final Map<String, dynamic>? cached = await _store.getJson(SnapshotKeys.profile);
+    final Map<String, dynamic>? cached = await _store.getJson(
+      SnapshotKeys.profile,
+    );
     if (cached != null) {
       return Profile.fromJson(cached);
     }
@@ -55,11 +57,17 @@ class ProfileRepository {
       return null;
     }
     try {
-      final dynamic row = await _client.from('profiles').select().eq('user_id', userId).maybeSingle();
+      final dynamic row = await _client
+          .from('profiles')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
       if (row == null) {
         return null;
       }
-      final Profile profile = Profile.fromJson(Map<String, dynamic>.from(row as Map));
+      final Profile profile = Profile.fromJson(
+        Map<String, dynamic>.from(row as Map),
+      );
       await _store.setJson(SnapshotKeys.profile, profile.toJson());
       return profile;
     } catch (_) {
@@ -73,22 +81,28 @@ class ProfileRepository {
       throw const AuthFailure('You need to sign in first.');
     }
     try {
-      await _client.from('profiles').update(<String, dynamic>{
-        'age': draft.age,
-        'sex': draft.sex.name,
-        'height_cm': draft.heightCm,
-        'activity_level': activityLevelValues[draft.activityLevel],
-        'training_experience': draft.experience.name,
-        'training_environment': const <TrainingEnvironment, String>{
-          TrainingEnvironment.home: 'home',
-          TrainingEnvironment.gym: 'gym',
-          TrainingEnvironment.outdoor: 'outdoor',
-          TrainingEnvironment.combination: 'combination',
-        }[draft.environment],
-        'onboarding_completed_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('user_id', userId);
+      await _client
+          .from('profiles')
+          .update(<String, dynamic>{
+            'age': draft.age,
+            'sex': draft.sex.name,
+            'height_cm': draft.heightCm,
+            'activity_level': activityLevelValues[draft.activityLevel],
+            'training_experience': draft.experience.name,
+            'training_environment': const <TrainingEnvironment, String>{
+              TrainingEnvironment.home: 'home',
+              TrainingEnvironment.gym: 'gym',
+              TrainingEnvironment.outdoor: 'outdoor',
+              TrainingEnvironment.combination: 'combination',
+            }[draft.environment],
+            'onboarding_completed_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', userId);
 
-      await _client.from('fitness_goals').update(<String, dynamic>{'is_active': false}).eq('user_id', userId);
+      await _client
+          .from('fitness_goals')
+          .update(<String, dynamic>{'is_active': false})
+          .eq('user_id', userId);
       await _client.from('fitness_goals').insert(<String, dynamic>{
         'user_id': userId,
         'goal_type': goalTypeValues[draft.goalType],
@@ -128,27 +142,35 @@ class ProfileRepository {
       }, onConflict: 'user_id');
 
       await _client.from('user_equipment').delete().eq('user_id', userId);
-      await _client.from('user_equipment').insert(
-        draft.equipment
-            .map((EquipmentType item) => <String, dynamic>{
-                  'user_id': userId,
-                  'equipment': equipmentValues[item],
-                })
-            .toList(),
-      );
+      await _client
+          .from('user_equipment')
+          .insert(
+            draft.equipment
+                .map(
+                  (EquipmentType item) => <String, dynamic>{
+                    'user_id': userId,
+                    'equipment': equipmentValues[item],
+                  },
+                )
+                .toList(),
+          );
 
       await _client.from('user_food_rules').delete().eq('user_id', userId);
       final List<Map<String, dynamic>> rules = <Map<String, dynamic>>[
-        ...draft.allergies.map((String value) => <String, dynamic>{
-              'user_id': userId,
-              'rule_type': 'allergy',
-              'value': value,
-            }),
-        ...draft.dislikedFoods.map((String value) => <String, dynamic>{
-              'user_id': userId,
-              'rule_type': 'dislike',
-              'value': value,
-            }),
+        ...draft.allergies.map(
+          (String value) => <String, dynamic>{
+            'user_id': userId,
+            'rule_type': 'allergy',
+            'value': value,
+          },
+        ),
+        ...draft.dislikedFoods.map(
+          (String value) => <String, dynamic>{
+            'user_id': userId,
+            'rule_type': 'dislike',
+            'value': value,
+          },
+        ),
       ];
       if (rules.isNotEmpty) {
         await _client.from('user_food_rules').insert(rules);
@@ -193,7 +215,9 @@ class ProfileRepository {
         await _store.setJson(
           SnapshotKeys.personalDetails,
           PersonalDetails(
-            profile: Profile.fromJson((await _store.getJson(SnapshotKeys.profile))!),
+            profile: Profile.fromJson(
+              (await _store.getJson(SnapshotKeys.profile))!,
+            ),
             currentWeightKg: draft.weightKg,
             targetWeightKg: draft.targetWeightKg,
             goalType: draft.goalType,
@@ -209,7 +233,9 @@ class ProfileRepository {
 
   Future<PersonalDetails?> fetchPersonalDetails() async {
     await _store.ensureReady();
-    final Map<String, dynamic>? cached = await _store.getJson(SnapshotKeys.personalDetails);
+    final Map<String, dynamic>? cached = await _store.getJson(
+      SnapshotKeys.personalDetails,
+    );
     if (cached != null) {
       return PersonalDetails.fromJson(cached);
     }
@@ -227,6 +253,7 @@ class ProfileRepository {
     double? heightCm,
     ActivityLevel? activityLevel,
     TrainingExperience? trainingExperience,
+    TrainingEnvironment? trainingEnvironment,
     bool recalculateNutrition = false,
   }) async {
     final String userId = _requireUserId();
@@ -249,6 +276,14 @@ class ProfileRepository {
     if (trainingExperience != null) {
       patch['training_experience'] = trainingExperience.name;
     }
+    if (trainingEnvironment != null) {
+      patch['training_environment'] = const <TrainingEnvironment, String>{
+        TrainingEnvironment.home: 'home',
+        TrainingEnvironment.gym: 'gym',
+        TrainingEnvironment.outdoor: 'outdoor',
+        TrainingEnvironment.combination: 'combination',
+      }[trainingEnvironment];
+    }
     if (patch.isEmpty) {
       return;
     }
@@ -262,11 +297,15 @@ class ProfileRepository {
           heightCm: heightCm,
           activityLevel: activityLevel,
           trainingExperience: trainingExperience,
+          trainingEnvironment: trainingEnvironment,
         );
         await _store.setJson(SnapshotKeys.profile, next.toJson());
         final PersonalDetails? details = await fetchPersonalDetails();
         if (details != null) {
-          await _store.setJson(SnapshotKeys.personalDetails, details.copyWith(profile: next).toJson());
+          await _store.setJson(
+            SnapshotKeys.personalDetails,
+            details.copyWith(profile: next).toJson(),
+          );
         }
       }
       await _store.enqueue(
@@ -294,16 +333,23 @@ class ProfileRepository {
           details.copyWith(currentWeightKg: weightKg).toJson(),
         );
       }
-      final Map<String, dynamic>? progressJson = await _store.getJson(SnapshotKeys.progress);
+      final Map<String, dynamic>? progressJson = await _store.getJson(
+        SnapshotKeys.progress,
+      );
       final ProgressSnapshot progress = progressJson == null
-          ? ProgressSnapshot(weights: <double>[weightKg], currentWeight: weightKg)
+          ? ProgressSnapshot(
+              weights: <double>[weightKg],
+              currentWeight: weightKg,
+            )
           : ProgressSnapshot.fromJson(progressJson);
       await _store.setJson(
         SnapshotKeys.progress,
-        progress.copyWith(
-          weights: <double>[...progress.weights, weightKg],
-          currentWeight: weightKg,
-        ).toJson(),
+        progress
+            .copyWith(
+              weights: <double>[...progress.weights, weightKg],
+              currentWeight: weightKg,
+            )
+            .toJson(),
       );
       await _store.enqueue(
         type: OutboxType.insertBodyMetric,
@@ -332,14 +378,20 @@ class ProfileRepository {
       if (details != null) {
         await _store.setJson(
           SnapshotKeys.personalDetails,
-          details.copyWith(goalType: goalType, targetWeightKg: targetWeightKg).toJson(),
+          details
+              .copyWith(goalType: goalType, targetWeightKg: targetWeightKg)
+              .toJson(),
         );
       }
-      final Map<String, dynamic>? progressJson = await _store.getJson(SnapshotKeys.progress);
+      final Map<String, dynamic>? progressJson = await _store.getJson(
+        SnapshotKeys.progress,
+      );
       if (progressJson != null && targetWeightKg != null) {
         await _store.setJson(
           SnapshotKeys.progress,
-          ProgressSnapshot.fromJson(progressJson).copyWith(targetWeight: targetWeightKg).toJson(),
+          ProgressSnapshot.fromJson(
+            progressJson,
+          ).copyWith(targetWeight: targetWeightKg).toJson(),
         );
       }
       await _store.enqueue(
@@ -349,7 +401,10 @@ class ProfileRepository {
           'row': <String, dynamic>{
             'id': const Uuid().v4(),
             'user_id': userId,
-            'goal_type': goalTypeValues[goalType ?? details?.goalType ?? GoalType.improveFitness],
+            'goal_type':
+                goalTypeValues[goalType ??
+                    details?.goalType ??
+                    GoalType.improveFitness],
             'target_weight_kg': targetWeightKg ?? details?.targetWeightKg,
             'is_active': true,
           },
@@ -400,7 +455,12 @@ class ProfileRepository {
     );
     await _store.setJson(
       SnapshotKeys.todayNutrition,
-      today.copyWith(calorieTarget: targets.calories, proteinTarget: targets.proteinG).toJson(),
+      today
+          .copyWith(
+            calorieTarget: targets.calories,
+            proteinTarget: targets.proteinG,
+          )
+          .toJson(),
     );
     await _store.enqueue(
       type: OutboxType.upsertNutritionTargets,

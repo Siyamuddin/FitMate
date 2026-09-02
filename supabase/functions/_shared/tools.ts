@@ -24,8 +24,10 @@ export function toolDefinitions() {
     'create_meal_plan',
     'modify_meal_plan',
     'add_food_log',
+    'update_nutrition_targets',
     'update_goal',
     'record_weight',
+    'update_profile',
   ]
   return [...read, ...write].map((name) => ({
     type: 'function',
@@ -44,7 +46,7 @@ export function toolDefinitions() {
   }))
 }
 
-export const LOW_RISK = new Set(['record_weight'])
+export const LOW_RISK = new Set<string>()
 
 export async function executeReadTool(
   supabase: SupabaseClient,

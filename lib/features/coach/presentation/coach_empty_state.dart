@@ -59,7 +59,7 @@ class CoachEmptyState extends StatelessWidget {
               runSpacing: AppSpacing.xs,
               children: prompts
                   .map(
-                    (String prompt) => _PromptChip(
+                    (String prompt) => CoachPromptChip(
                       label: prompt,
                       enabled: online,
                       onTap: () => onPrompt(prompt),
@@ -74,8 +74,9 @@ class CoachEmptyState extends StatelessWidget {
   }
 }
 
-class _PromptChip extends StatelessWidget {
-  const _PromptChip({
+class CoachPromptChip extends StatelessWidget {
+  const CoachPromptChip({
+    super.key,
     required this.label,
     required this.enabled,
     required this.onTap,

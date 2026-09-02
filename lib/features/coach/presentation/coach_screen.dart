@@ -10,13 +10,16 @@ import 'package:fitmate/core/theme/app_colors.dart';
 import 'package:fitmate/core/theme/app_motion.dart';
 import 'package:fitmate/core/theme/app_spacing.dart';
 import 'package:fitmate/core/theme/app_typography.dart';
-import 'package:fitmate/core/utils/formatters.dart';
 import 'package:fitmate/core/widgets/ai_cards.dart';
+import 'package:fitmate/features/coach/domain/action_preview.dart';
 import 'package:fitmate/features/coach/domain/ai_action_applier.dart';
+import 'package:fitmate/features/coach/domain/coach_reply.dart';
 import 'package:fitmate/features/coach/presentation/coach_composer.dart';
 import 'package:fitmate/features/coach/presentation/coach_empty_state.dart';
 import 'package:fitmate/features/coach/presentation/coach_thinking.dart';
+import 'package:fitmate/features/nutrition/presentation/nutrition_screen.dart';
 import 'package:fitmate/features/onboarding/presentation/onboarding_controller.dart';
+import 'package:fitmate/features/workout/domain/workout_models.dart';
 import 'package:fitmate/features/workout/presentation/workout_providers.dart';
 import 'package:fitmate/services/analytics/analytics_service.dart';
 
@@ -25,6 +28,10 @@ class CoachMessage {
     required this.role,
     required this.text,
     this.actions = const <Map<String, dynamic>>[],
+    this.previewLines = const <String>[],
+    this.clarifyingQuestions = const <String>[],
+    this.bullets = const <String>[],
+    this.intent,
     this.requiresConfirmation = false,
     this.dismissed = false,
     this.applied = false,
@@ -34,6 +41,10 @@ class CoachMessage {
   final String role;
   final String text;
   final List<Map<String, dynamic>> actions;
+  final List<String> previewLines;
+  final List<String> clarifyingQuestions;
+  final List<String> bullets;
+  final String? intent;
   final bool requiresConfirmation;
   final bool applied;
   final bool dismissed;
@@ -44,6 +55,10 @@ class CoachMessage {
       role: role,
       text: text,
       actions: actions,
+      previewLines: previewLines,
+      clarifyingQuestions: clarifyingQuestions,
+      bullets: bullets,
+      intent: intent,
       requiresConfirmation: requiresConfirmation,
       dismissed: dismissed ?? this.dismissed,
       applied: applied ?? this.applied,
@@ -61,6 +76,10 @@ class CoachMessage {
       applied: json['applied'] == true,
       dismissed: json['dismissed'] == true,
       failed: json['failed'] == true,
+      intent: json['intent'] as String?,
+      previewLines: coachStringList(json['preview_lines']),
+      clarifyingQuestions: coachStringList(json['clarifying_questions']),
+      bullets: coachStringList(json['bullets']),
       actions: actions
           .whereType<Map>()
           .map((Map item) => Map<String, dynamic>.from(item))
@@ -73,12 +92,17 @@ class CoachMessage {
       'role': role,
       'text': text,
       'actions': actions,
+      'preview_lines': previewLines,
+      'clarifying_questions': clarifyingQuestions,
+      'bullets': bullets,
+      'intent': intent,
       'requires_confirmation': requiresConfirmation,
       'applied': applied,
       'dismissed': dismissed,
       'failed': failed,
     };
   }
+
 }
 
 class CoachScreen extends ConsumerStatefulWidget {
@@ -191,12 +215,13 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
       if (_startFresh) {
         body['new_conversation'] = true;
       }
-      final Map<String, dynamic> response = await EdgeFunctions.invoke(
-        'coach-chat',
-        body: body,
-      );
-      final List<dynamic> actions =
-          response['actions'] as List<dynamic>? ?? <dynamic>[];
+      final Map<String, dynamic> response = await ref.read(
+        edgeFunctionsProvider,
+      )('coach-chat', body: body);
+      final WorkoutPlan? plan = await ref
+          .read(workoutRepositoryProvider)
+          .cachedPlan();
+      final CoachReply reply = parseCoachReply(response, plan: plan);
       if (!mounted || generation != _sendGeneration) {
         return;
       }
@@ -205,20 +230,19 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
         _messages.add(
           CoachMessage(
             role: 'assistant',
-            text:
-                response['message'] as String? ??
-                'I am here to help with your plan.',
-            requiresConfirmation:
-                response['requires_confirmation'] as bool? ?? false,
-            actions: actions
-                .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-                .toList(),
+            text: reply.text,
+            requiresConfirmation: reply.requiresConfirmation,
+            intent: reply.intent,
+            actions: reply.actions,
+            previewLines: reply.previewLines,
+            clarifyingQuestions: reply.clarifyingQuestions,
+            bullets: reply.bullets,
           ),
         );
       });
       _scrollToLatest();
       await _persist();
-      if (actions.isNotEmpty) {
+      if (reply.actions.isNotEmpty) {
         ref.read(analyticsServiceProvider).track('ai_action_proposed');
       }
     } catch (error) {
@@ -250,6 +274,7 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
         workouts: ref.read(workoutRepositoryProvider),
         profiles: ref.read(profileRepositoryProvider),
         store: ref.read(localStoreProvider),
+        nutrition: ref.read(nutritionRepositoryProvider),
       ).apply(message.actions);
       await AppHaptics.confirmation();
       ref.read(analyticsServiceProvider).track('ai_action_approved');
@@ -321,61 +346,6 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
     await _persist();
   }
 
-  String _actionSummary(List<Map<String, dynamic>> actions) {
-    return actions
-        .map((Map<String, dynamic> action) {
-          final String type = action['type'] as String? ?? 'change';
-          final Map<String, dynamic> changes = action['changes'] is Map
-              ? Map<String, dynamic>.from(action['changes'] as Map)
-              : <String, dynamic>{};
-          if (type == 'update_training_plan' || type == 'create_workout_plan') {
-            final Object? days = changes['days_per_week'];
-            final Object? add = changes['add_workout_day'];
-            final List<String> lines = <String>[];
-            if (days != null) {
-              lines.add('Train $days days per week');
-            }
-            if (changes['remove_workout_day_id'] != null ||
-                changes['remove_workout_day'] != null) {
-              lines.add('Remove a training day');
-            }
-            final Object? removeWeekday = changes['remove_weekday'];
-            if (removeWeekday is num) {
-              lines.add(
-                'Drop ${Formatters.weekdayName(removeWeekday.toInt())}',
-              );
-            }
-            if (add is Map) {
-              final Map<String, dynamic> day = Map<String, dynamic>.from(add);
-              final String name = day['name'] as String? ?? 'New workout';
-              final Object? weekday = day['weekday'];
-              if (weekday is num) {
-                lines.add(
-                  'Add ${Formatters.weekdayName(weekday.toInt())}: $name',
-                );
-              } else {
-                lines.add('Add $name');
-              }
-            }
-            if (lines.isNotEmpty) {
-              return lines.join('\n');
-            }
-          }
-          if (type == 'modify_workout_exercise') {
-            final Object? sets = changes['sets'] ?? changes['target_sets'];
-            final Object? reps = changes['reps'];
-            if (sets != null && reps != null) {
-              return 'Update exercise to $sets × $reps';
-            }
-            if (sets != null) {
-              return 'Update sets to $sets';
-            }
-          }
-          return type.replaceAll('_', ' ');
-        })
-        .join('\n');
-  }
-
   Widget _messageRow(int index, CoachMessage message) {
     final Brightness brightness = MediaQuery.platformBrightnessOf(context);
     final bool mine = message.role == 'user';
@@ -383,23 +353,49 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
         !mine &&
         message.requiresConfirmation &&
         message.actions.isNotEmpty &&
-        !message.dismissed &&
-        !message.applied;
+        !message.dismissed;
+    final List<String> preview = message.previewLines.isNotEmpty
+        ? List<String>.from(message.previewLines)
+        : ActionPreview.lines(message.actions);
+    if (preview.isEmpty && message.actions.isNotEmpty) {
+      preview.add('Update your plan');
+    }
 
     return Column(
       crossAxisAlignment: mine
           ? CrossAxisAlignment.end
           : CrossAxisAlignment.start,
       children: <Widget>[
-        AIMessageBubble(text: message.text, isUser: mine),
-        if (showAction)
+        AIMessageBubble(
+          text: message.text,
+          isUser: mine,
+          bullets: message.bullets,
+        ),
+        if (showAction && preview.isNotEmpty)
           AIActionCard(
-            summary: _actionSummary(message.actions),
+            lines: preview,
             applying: _applying,
+            applied: message.applied,
             onApply: () => _apply(index, message),
             onDismiss: () => _dismiss(index, message),
           ),
-        if (!mine && message.applied) const AIAppliedLabel(),
+        if (!mine && !message.applied && message.clarifyingQuestions.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            child: Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: message.clarifyingQuestions
+                  .map(
+                    (String question) => CoachPromptChip(
+                      label: question,
+                      enabled: !_sending,
+                      onTap: () => _send(preset: question),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
         if (mine && message.failed)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.md),

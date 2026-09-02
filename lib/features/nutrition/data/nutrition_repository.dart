@@ -1,8 +1,10 @@
 import 'package:uuid/uuid.dart';
+import 'package:fitmate/core/errors/app_exception.dart';
 import 'package:fitmate/core/errors/error_mapper.dart';
 import 'package:fitmate/core/local/local_store.dart';
 import 'package:fitmate/core/local/snapshot_keys.dart';
 import 'package:fitmate/core/networking/supabase_provider.dart';
+import 'package:fitmate/core/utils/fitness_calc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class Food {
@@ -113,7 +115,8 @@ class DailyNutrition {
       protein: (json['protein'] as num?)?.toDouble() ?? 0,
       carbohydrates: (json['carbohydrates'] as num?)?.toDouble() ?? 0,
       fat: (json['fat'] as num?)?.toDouble() ?? 0,
-      calorieTarget: json['calorie_target'] as int? ?? (json['calories_target'] as int?),
+      calorieTarget:
+          json['calorie_target'] as int? ?? (json['calories_target'] as int?),
       proteinTarget: (json['protein_target'] as num?)?.toDouble(),
     );
   }
@@ -150,7 +153,10 @@ class FoodLog {
   factory FoodLog.fromJson(Map<String, dynamic> json) {
     return FoodLog(
       id: json['id'] as String,
-      foodName: json['food_name'] as String? ?? (json['foods'] as Map?)?['name'] as String? ?? 'Food',
+      foodName:
+          json['food_name'] as String? ??
+          (json['foods'] as Map?)?['name'] as String? ??
+          'Food',
       mealSlot: json['meal_slot'] as String,
       calories: (json['calories'] as num).toDouble(),
       protein: (json['protein'] as num).toDouble(),
@@ -175,9 +181,9 @@ class NutritionRepository {
     required LocalStore store,
     VoidCallback? onChanged,
     SupabaseClient? client,
-  })  : _store = store,
-        _onChanged = onChanged,
-        _client = client ?? SupabaseProvider.client;
+  }) : _store = store,
+       _onChanged = onChanged,
+       _client = client ?? SupabaseProvider.client;
 
   final LocalStore _store;
   final VoidCallback? _onChanged;
@@ -189,13 +195,20 @@ class NutritionRepository {
     if (rows == null) {
       return <Food>[];
     }
-    return rows.map((dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map))).toList();
+    return rows
+        .map(
+          (dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map)),
+        )
+        .toList();
   }
 
   Future<List<Food>> search(String query, {required bool online}) async {
     final String needle = query.trim().toLowerCase();
     final List<Food> cached = await cachedFoods();
-    List<Food> matches = cached.where((Food food) => food.name.toLowerCase().contains(needle)).take(30).toList();
+    List<Food> matches = cached
+        .where((Food food) => food.name.toLowerCase().contains(needle))
+        .take(30)
+        .toList();
     if (online) {
       try {
         final List<dynamic> rows = await _client
@@ -204,12 +217,20 @@ class NutritionRepository {
             .ilike('name', '%$query%')
             .eq('is_active', true)
             .limit(30);
-        final List<Food> remote = rows.map((dynamic row) => Food.fromJson(Map<String, dynamic>.from(row as Map))).toList();
+        final List<Food> remote = rows
+            .map(
+              (dynamic row) =>
+                  Food.fromJson(Map<String, dynamic>.from(row as Map)),
+            )
+            .toList();
         final Map<String, Food> byId = <String, Food>{
           for (final Food food in cached) food.id: food,
           for (final Food food in remote) food.id: food,
         };
-        await _store.setList(SnapshotKeys.foodsCache, byId.values.map((Food food) => food.toJson()).toList());
+        await _store.setList(
+          SnapshotKeys.foodsCache,
+          byId.values.map((Food food) => food.toJson()).toList(),
+        );
         matches = remote;
         _onChanged?.call();
       } catch (error) {
@@ -221,7 +242,11 @@ class NutritionRepository {
     return matches;
   }
 
-  Future<void> logFood({required Food food, required String mealSlot, required double quantity}) async {
+  Future<void> logFood({
+    required Food food,
+    required String mealSlot,
+    required double quantity,
+  }) async {
     final Food scaled = food.scaled(quantity);
     final String id = const Uuid().v4();
     final FoodLog log = FoodLog(
@@ -234,7 +259,10 @@ class NutritionRepository {
     );
     final List<FoodLog> logs = await todayLogs();
     logs.add(log);
-    await _store.setList(SnapshotKeys.foodLogsToday, logs.map((FoodLog item) => item.toJson()).toList());
+    await _store.setList(
+      SnapshotKeys.foodLogsToday,
+      logs.map((FoodLog item) => item.toJson()).toList(),
+    );
     final DailyNutrition today = await this.today();
     await _store.setJson(
       SnapshotKeys.todayNutrition,
@@ -268,13 +296,74 @@ class NutritionRepository {
     _onChanged?.call();
   }
 
+  Future<void> updateTargets({
+    int? calories,
+    double? proteinG,
+    double? carbohydratesG,
+    double? fatG,
+  }) async {
+    await _store.ensureReady();
+    final Map<String, dynamic> current =
+        await _store.getJson(SnapshotKeys.nutritionTargets) ??
+        <String, dynamic>{};
+    if (calories != null && (calories < 800 || calories > 6000)) {
+      throw const AppException('That calorie target looks off.');
+    }
+    if (proteinG != null && (proteinG < 20 || proteinG > 400)) {
+      throw const AppException('That protein target looks off.');
+    }
+    final int nextCalories = calories ?? current['calories'] as int? ?? 0;
+    final double nextProtein =
+        proteinG ?? (current['protein_g'] as num?)?.toDouble() ?? 0;
+    final double nextCarbs =
+        carbohydratesG ?? (current['carbohydrates_g'] as num?)?.toDouble() ?? 0;
+    final double nextFat = fatG ?? (current['fat_g'] as num?)?.toDouble() ?? 0;
+    final NutritionTargets targets = NutritionTargets(
+      bmr: (current['bmr'] as num?)?.toDouble() ?? 0,
+      tdee: (current['tdee'] as num?)?.toDouble() ?? 0,
+      calories: nextCalories,
+      proteinG: nextProtein,
+      carbohydratesG: nextCarbs,
+      fatG: nextFat,
+    );
+    await _store.setJson(SnapshotKeys.nutritionTargets, targets.toJson());
+    final DailyNutrition today = await this.today();
+    await _store.setJson(
+      SnapshotKeys.todayNutrition,
+      today
+          .copyWith(
+            calorieTarget: targets.calories,
+            proteinTarget: targets.proteinG,
+          )
+          .toJson(),
+    );
+    await _store.enqueue(
+      type: OutboxType.upsertNutritionTargets,
+      entity: SnapshotKeys.nutritionTargets,
+      payload: <String, dynamic>{
+        'user_id': _client.auth.currentUser?.id,
+        'calories': targets.calories,
+        'protein_g': targets.proteinG,
+        'carbohydrates_g': targets.carbohydratesG,
+        'fat_g': targets.fatG,
+        'bmr': targets.bmr,
+        'tdee': targets.tdee,
+      },
+    );
+    _onChanged?.call();
+  }
+
   Future<DailyNutrition> today() async {
     await _store.ensureReady();
-    final Map<String, dynamic>? json = await _store.getJson(SnapshotKeys.todayNutrition);
+    final Map<String, dynamic>? json = await _store.getJson(
+      SnapshotKeys.todayNutrition,
+    );
     if (json != null) {
       return DailyNutrition.fromJson(json);
     }
-    final Map<String, dynamic>? targets = await _store.getJson(SnapshotKeys.nutritionTargets);
+    final Map<String, dynamic>? targets = await _store.getJson(
+      SnapshotKeys.nutritionTargets,
+    );
     return DailyNutrition(
       calories: 0,
       protein: 0,
@@ -287,11 +376,18 @@ class NutritionRepository {
 
   Future<List<FoodLog>> todayLogs() async {
     await _store.ensureReady();
-    final List<dynamic>? rows = await _store.getList(SnapshotKeys.foodLogsToday);
+    final List<dynamic>? rows = await _store.getList(
+      SnapshotKeys.foodLogsToday,
+    );
     if (rows == null) {
       return <FoodLog>[];
     }
-    return rows.map((dynamic row) => FoodLog.fromJson(Map<String, dynamic>.from(row as Map))).toList();
+    return rows
+        .map(
+          (dynamic row) =>
+              FoodLog.fromJson(Map<String, dynamic>.from(row as Map)),
+        )
+        .toList();
   }
 
   Future<void> deleteLog(String id) async {
@@ -305,15 +401,24 @@ class NutritionRepository {
         next.add(log);
       }
     }
-    await _store.setList(SnapshotKeys.foodLogsToday, next.map((FoodLog item) => item.toJson()).toList());
+    await _store.setList(
+      SnapshotKeys.foodLogsToday,
+      next.map((FoodLog item) => item.toJson()).toList(),
+    );
     if (removed != null) {
       final DailyNutrition today = await this.today();
       await _store.setJson(
         SnapshotKeys.todayNutrition,
         today
             .copyWith(
-              calories: (today.calories - removed.calories).clamp(0, double.infinity),
-              protein: (today.protein - removed.protein).clamp(0, double.infinity),
+              calories: (today.calories - removed.calories).clamp(
+                0,
+                double.infinity,
+              ),
+              protein: (today.protein - removed.protein).clamp(
+                0,
+                double.infinity,
+              ),
             )
             .toJson(),
       );
@@ -328,4 +433,3 @@ class NutritionRepository {
 }
 
 typedef VoidCallback = void Function();
-
