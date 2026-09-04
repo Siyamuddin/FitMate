@@ -35,18 +35,26 @@ export async function chatJson(args: {
   temperature: number
   maxTokens: number
   system: string
-  user: string
+  user?: string
+  messages?: { role: string; content: string }[]
   tools?: unknown[]
 }) {
   const key = await openaiKey()
+  const history = (args.messages ?? []).filter(
+    (item) => item.role === 'user' || item.role === 'assistant' || item.role === 'system',
+  )
+  const messages: { role: string; content: string }[] = [
+    { role: 'system', content: args.system },
+    ...history,
+  ]
+  if (args.user) {
+    messages.push({ role: 'user', content: args.user })
+  }
   const body: Record<string, unknown> = {
     model: args.model,
     max_completion_tokens: args.maxTokens,
     response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: args.system },
-      { role: 'user', content: args.user },
-    ],
+    messages,
   }
   if (isGpt56Family(args.model)) {
     body.reasoning_effort = 'low'

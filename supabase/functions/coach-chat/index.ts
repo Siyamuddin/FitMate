@@ -3,8 +3,13 @@ import { adminClient, requireUser } from '../_shared/auth.ts'
 import { buildContext } from '../_shared/context.ts'
 import { chatJson } from '../_shared/openai.ts'
 import { failClosedMessage, sanitizeUserMessage } from '../_shared/safety.ts'
-import { LOW_RISK } from '../_shared/tools.ts'
-import { APPLIABLE_ACTIONS, honestCoachMessage } from '../_shared/honesty.ts'
+import {
+  APPLIABLE_ACTIONS,
+  asStringList,
+  honestCoachMessage,
+  messageTextFromContent,
+} from '../_shared/honesty.ts'
+import { FALLBACK_COACH_INSTRUCTION, FALLBACK_SYSTEM_PROMPT } from '../_shared/coach_prompt.ts'
 import { enforceRateLimit, recordUsage } from '../_shared/usage.ts'
 
 Deno.serve(async (req) => {
@@ -20,14 +25,37 @@ Deno.serve(async (req) => {
     const context = await buildContext(supabase, user.id)
     const { data: prompt } = await admin.from('ai_prompt_versions').select('*').eq('is_active', true).maybeSingle()
 
-    let conversationId = body.conversation_id as string | undefined
+    const startFresh = body.new_conversation === true
+    let conversationId = startFresh ? undefined : body.conversation_id as string | undefined
     if (!conversationId) {
-      const { data: existing } = await supabase.from('ai_conversations').select('id').order('updated_at', { ascending: false }).limit(1).maybeSingle()
-      if (existing) conversationId = existing.id
-      else {
+      if (!startFresh) {
+        const { data: existing } = await supabase.from('ai_conversations').select('id').order('updated_at', { ascending: false }).limit(1).maybeSingle()
+        if (existing) conversationId = existing.id
+      }
+      if (!conversationId) {
         const { data: created } = await supabase.from('ai_conversations').insert({ user_id: user.id, title: 'Coach' }).select('id').single()
         conversationId = created?.id
       }
+    }
+
+    const history: { role: string; content: string }[] = []
+    if (conversationId) {
+      const { data: prior } = await supabase
+        .from('ai_messages')
+        .select('role, content, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(8)
+      history.push(
+        ...(prior ?? [])
+          .slice()
+          .reverse()
+          .map((row: { role: string; content: unknown }) => ({
+            role: row.role === 'assistant' ? 'assistant' : 'user',
+            content: messageTextFromContent(row.content),
+          }))
+          .filter((row: { content: string }) => row.content.length > 0),
+      )
     }
 
     await supabase.from('ai_messages').insert({
@@ -40,24 +68,27 @@ Deno.serve(async (req) => {
       model: config?.model ?? prompt?.model ?? 'gpt-5.6-luna',
       temperature: Number(config?.temperature ?? 0.4),
       maxTokens: config?.max_output_tokens ?? 1200,
-      system: `${prompt?.system_prompt ?? ''}\n${prompt?.coach_instruction ?? 'Return JSON with keys: message, requires_confirmation, actions (array of {type, target_id, changes}).'}\nNever say you updated, saved, or applied a plan change. High-risk changes (training days, workouts, goals) are proposals only until the user taps Apply. Allowed action types: update_training_plan, modify_workout_day, modify_workout_exercise, update_goal, record_weight. For weekly training days, use update_training_plan with the active plan id and changes.days_per_week. To add a day, include add_workout_day { name, weekday, exercises: [{ exercise_id, sets, reps, rest_seconds }] } using only provided exercise IDs. To drop a day, include remove_workout_day_id with that day's id.`,
+      system: `${prompt?.system_prompt ?? FALLBACK_SYSTEM_PROMPT}\n${prompt?.coach_instruction ?? FALLBACK_COACH_INSTRUCTION}`,
+      messages: history,
       user: JSON.stringify({ message, context }),
     })
 
+    const intent = String(result.parsed.intent ?? '').toLowerCase()
     const rawActions = Array.isArray(result.parsed.actions) ? result.parsed.actions as Record<string, unknown>[] : []
-    const actions = rawActions.filter((action) => APPLIABLE_ACTIONS.has(String(action.type ?? '')))
-    const droppedUnsupported = rawActions.length > actions.length
-    const requiresConfirmation = actions.some((action) => !LOW_RISK.has(String(action.type ?? '')))
-
-    let applied = false
-    if (!requiresConfirmation && actions.length) {
-      applied = await applyLowRisk(supabase, user.id, actions)
-    }
+    const actions = intent === 'propose'
+      ? rawActions.filter((action) => APPLIABLE_ACTIONS.has(String(action.type ?? '')))
+      : []
+    const droppedUnsupported = intent === 'propose' && rawActions.length > actions.length
+    const requiresConfirmation = actions.length > 0
+    const previewLines = asStringList(result.parsed.preview_lines)
+    const clarifyingQuestions = intent === 'clarify' ? asStringList(result.parsed.clarifying_questions).slice(0, 2) : []
+    const bullets = asStringList(result.parsed.bullets)
 
     const messageText = honestCoachMessage({
       message: String(result.parsed.message ?? ''),
+      intent,
       requiresConfirmation,
-      applied,
+      applied: false,
       droppedUnsupported,
     })
 
@@ -67,9 +98,13 @@ Deno.serve(async (req) => {
       content: {
         ...result.parsed,
         message: messageText,
+        intent: requiresConfirmation ? 'propose' : (intent || 'answer'),
         requires_confirmation: requiresConfirmation,
         actions,
-        applied,
+        preview_lines: previewLines,
+        clarifying_questions: clarifyingQuestions,
+        bullets,
+        applied: false,
       },
       prompt_version_id: prompt?.id ?? null,
     }).select('id').single()
@@ -80,9 +115,9 @@ Deno.serve(async (req) => {
         message_id: assistant?.id,
         action_type: action.type,
         arguments: action,
-        status: requiresConfirmation ? 'proposed' : applied ? 'executed' : 'failed',
-        requires_confirmation: requiresConfirmation,
-        result: applied ? { ok: true } : requiresConfirmation ? null : { ok: false },
+        status: 'proposed',
+        requires_confirmation: true,
+        result: null,
       })))
     }
 
@@ -97,9 +132,13 @@ Deno.serve(async (req) => {
 
     return json({
       message: messageText,
+      intent: requiresConfirmation ? 'propose' : (intent || 'answer'),
       requires_confirmation: requiresConfirmation,
-      applied,
+      applied: false,
       actions: requiresConfirmation ? actions : [],
+      preview_lines: previewLines,
+      clarifying_questions: clarifyingQuestions,
+      bullets,
       conversation_id: conversationId,
     })
   } catch (error) {
@@ -110,21 +149,3 @@ Deno.serve(async (req) => {
     return json({ error: failClosedMessage() }, 400)
   }
 })
-
-async function applyLowRisk(
-  supabase: ReturnType<typeof requireUser> extends Promise<infer T> ? T extends { supabase: infer S } ? S : never : never,
-  userId: string,
-  actions: Record<string, unknown>[],
-) {
-  let saved = false
-  for (const action of actions) {
-    if (action.type !== 'record_weight') continue
-    const changes = action.changes && typeof action.changes === 'object' ? action.changes as { weight_kg?: number } : {}
-    const weight = Number(changes.weight_kg)
-    if (weight < 30 || weight > 400) continue
-    const { error } = await supabase.from('body_metrics').insert({ user_id: userId, weight_kg: weight })
-    if (error) throw error
-    saved = true
-  }
-  return saved
-}

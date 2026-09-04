@@ -1,5 +1,15 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fitmate/core/errors/app_exception.dart';
 import 'package:fitmate/core/networking/supabase_provider.dart';
+
+typedef EdgeFunctionInvoker = Future<Map<String, dynamic>> Function(
+  String name, {
+  Map<String, dynamic>? body,
+});
+
+final edgeFunctionsProvider = Provider<EdgeFunctionInvoker>((Ref ref) {
+  return EdgeFunctions.invoke;
+});
 
 class EdgeFunctions {
   const EdgeFunctions._();
